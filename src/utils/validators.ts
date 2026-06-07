@@ -10,3 +10,7 @@ export function isValidEmail(email: string): boolean {
 export function isNonEmpty(value: string): boolean {
   return value.trim().length > 0;
 }
+
+export function hasMinLength(value: string, min: number): boolean {
+  return value.length >= min;
+}

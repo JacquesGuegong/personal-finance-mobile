@@ -6,10 +6,14 @@
 export interface User {
   id: string;
   email: string;
-  name: string;
+  name?: string; // optional: the auth endpoints may not return a display name
 }
 
-/** What the Spring Boot API returns from /auth/login and /auth/register. */
+/**
+ * App-internal auth result (normalized in authService).
+ * NOTE: the API itself returns a FLAT body { token, userId, email } — see
+ * authService.ts, which maps it into this shape.
+ */
 export interface AuthResponse {
   token: string; // JWT — stored in AsyncStorage (see CLAUDE.md)
   user: User;
@@ -21,7 +25,6 @@ export interface LoginRequest {
 }
 
 export interface RegisterRequest {
-  name: string;
   email: string;
   password: string;
 }

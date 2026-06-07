@@ -1,6 +1,7 @@
 import { createContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { authService } from '@/src/services/authService';
+import { clearSession, loadSession, saveSession } from '@/src/services/authStorage';
 import type { User } from '@/src/types';
 
 // The shape of everything the rest of the app can read/do regarding auth.
@@ -9,7 +10,7 @@ export interface AuthContextValue {
   token: string | null;
   isLoading: boolean; // true while we restore a saved session on startup
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -22,30 +23,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore any saved session once, on app startup.
+  // Restore a saved session once, on app startup, so a returning user skips the
+  // login screen.
   useEffect(() => {
-    // TODO (next turn): read the JWT from AsyncStorage, validate it, and if
-    // valid set user/token here so the user stays logged in across restarts.
-    // For now we simply finish "checking" and start logged-out.
-    setIsLoading(false);
+    (async () => {
+      try {
+        const session = await loadSession();
+        if (session) {
+          setToken(session.token);
+          setUser(session.user);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    })();
   }, []);
 
   async function login(email: string, password: string): Promise<void> {
     const res = await authService.login({ email, password });
-    // TODO: await AsyncStorage.setItem('token', res.token);
+    await saveSession(res.token, res.user);
     setToken(res.token);
     setUser(res.user);
   }
 
-  async function register(name: string, email: string, password: string): Promise<void> {
-    const res = await authService.register({ name, email, password });
-    // TODO: await AsyncStorage.setItem('token', res.token);
+  async function register(email: string, password: string): Promise<void> {
+    const res = await authService.register({ email, password });
+    await saveSession(res.token, res.user);
     setToken(res.token);
     setUser(res.user);
   }
 
   async function logout(): Promise<void> {
-    // TODO: await AsyncStorage.removeItem('token');
+    await clearSession();
     setToken(null);
     setUser(null);
   }
