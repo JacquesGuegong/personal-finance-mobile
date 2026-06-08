@@ -42,11 +42,17 @@ Path alias: `@/*` maps to the project root, so import as `@/src/...`.
 ## Current Status
 - Navigation, auth gate, and tab placeholder screens are in place.
 - Auth is wired to the real API (axios + AsyncStorage installed):
-  - src/services/api.ts — shared axios client; request interceptor attaches the JWT.
+  - src/services/api.ts — shared axios client.
+    - baseURL: EXPO_PUBLIC_API_URL (.env) > dev LAN auto-detect (Expo hostUri) > prod default.
+    - request interceptor attaches the JWT.
+    - response interceptor: 401 on a protected request -> clears session via a
+      handler registered by AuthContext (setUnauthorizedHandler) -> nav falls back to login.
   - src/services/authService.ts — POST /api/auth/login and /api/auth/register,
     with HTTP errors translated to user-friendly messages.
   - src/services/authStorage.ts — persists/restores { token, user } in AsyncStorage.
-  - AuthContext restores the saved session on startup.
+  - AuthContext: token, user, isAuthenticated, isLoading; login(email,password),
+    register(email,password), logout; restores the saved session on startup.
+  - Nav gate uses isAuthenticated; LoadingScreen shows while isLoading.
   - VERIFIED backend contract (probed against running server):
     success body is FLAT { token, userId, email } (normalized to { token, user });
     login bad password -> 403; register duplicate -> 409.
@@ -55,5 +61,5 @@ Path alias: `@/*` maps to the project root, so import as `@/src/...`.
 - Tab screens (Dashboard, Transactions, Budgets, Alerts) are still placeholders.
 
 ## API Base URL
-Dev: http://localhost:8080
-Prod: set in .env file
+Dev: auto-detected LAN host (so physical devices reach the local server)
+Override / Prod: EXPO_PUBLIC_API_URL in .env (see .env.example)

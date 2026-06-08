@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 
+import LoadingScreen from '@/src/components/LoadingScreen';
 import { AuthProvider } from '@/src/context/AuthContext';
 import { useAuth } from '@/src/hooks/useAuth';
 
@@ -49,26 +50,26 @@ export default function RootLayout() {
 }
 
 function RootNavigator() {
-  const { user, isLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
-  // While we're restoring a saved session, render nothing (splash still showing
-  // in a real build). This avoids briefly flashing the login screen.
+  // While we're restoring a saved session, show a loading screen instead of
+  // briefly flashing the login screen before auto-login resolves.
   if (isLoading) {
-    return null;
+    return <LoadingScreen />;
   }
 
   // This is the auth gate. `Stack.Protected` only registers its child routes
   // when `guard` is true, so exactly one of these groups is ever reachable:
-  //   - logged in  -> the (app) bottom-tab stack
-  //   - logged out -> the (auth) login/register stack
-  // When `user` flips (login or logout), Expo Router swaps stacks for us — no
-  // manual navigation.replace() calls needed.
+  //   - authenticated -> the (app) bottom-tab stack
+  //   - not auth'd     -> the (auth) login/register stack
+  // When isAuthenticated flips (login, logout, or a 401), Expo Router swaps
+  // stacks for us — no manual navigation.replace() calls needed.
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Protected guard={!!user}>
+      <Stack.Protected guard={isAuthenticated}>
         <Stack.Screen name="(app)" />
       </Stack.Protected>
-      <Stack.Protected guard={!user}>
+      <Stack.Protected guard={!isAuthenticated}>
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
     </Stack>

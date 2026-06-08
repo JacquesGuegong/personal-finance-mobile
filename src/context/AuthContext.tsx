@@ -1,5 +1,6 @@
 import { createContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { setUnauthorizedHandler } from '@/src/services/api';
 import { authService } from '@/src/services/authService';
 import { clearSession, loadSession, saveSession } from '@/src/services/authStorage';
 import type { User } from '@/src/types';
@@ -8,6 +9,7 @@ import type { User } from '@/src/types';
 export interface AuthContextValue {
   user: User | null;
   token: string | null;
+  isAuthenticated: boolean; // convenience flag derived from token; drives the nav gate
   isLoading: boolean; // true while we restore a saved session on startup
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
@@ -39,6 +41,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
+  // Let the API client kick the user out when a protected request returns 401
+  // (expired/invalid token). Resetting state here makes the nav gate fall back
+  // to the login stack automatically — same path as a manual logout.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      void clearSession();
+      setToken(null);
+      setUser(null);
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
   async function login(email: string, password: string): Promise<void> {
     const res = await authService.login({ email, password });
     await saveSession(res.token, res.user);
@@ -62,7 +76,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // useMemo keeps the context value stable between renders so consumers don't
   // re-render unless something actually changed.
   const value = useMemo<AuthContextValue>(
-    () => ({ user, token, isLoading, login, register, logout }),
+    () => ({
+      user,
+      token,
+      isAuthenticated: token !== null,
+      isLoading,
+      login,
+      register,
+      logout,
+    }),
     [user, token, isLoading],
   );
 

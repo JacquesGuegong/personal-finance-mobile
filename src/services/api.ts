@@ -24,10 +24,18 @@ function resolveDevBaseUrl(): string {
   return host ? `http://${host}:${API_PORT}` : `http://localhost:${API_PORT}`;
 }
 
-// __DEV__ is a React Native global: true in development, false in a release build.
-export const API_BASE_URL = __DEV__
-  ? resolveDevBaseUrl() // Spring Boot dev server, reachable from the device
-  : 'https://your-aws-url.com'; // production (move to .env before shipping)
+// Resolution order:
+//   1. EXPO_PUBLIC_API_URL from .env (explicit override — used for prod or to
+//      point at a deployed/staging API). Expo inlines EXPO_PUBLIC_* at build time.
+//   2. Dev: auto-detected LAN host so a physical device just works.
+//   3. Prod fallback if no env var was set.
+const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+export const API_BASE_URL =
+  ENV_BASE_URL && ENV_BASE_URL.length > 0
+    ? ENV_BASE_URL
+    : __DEV__
+      ? resolveDevBaseUrl()
+      : 'https://your-aws-url.com';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -44,3 +52,29 @@ api.interceptors.request.use(async (config) => {
   }
   return config;
 });
+
+// ─── 401 handling ──────────────────────────────────────────────────────────
+// A 401 on a protected request means the token is missing/expired/invalid.
+// We want to clear the session and bounce the user to login. But this module is
+// framework-agnostic (no React, no navigation), so instead of importing the
+// auth context here, AuthContext REGISTERS a handler via setUnauthorizedHandler.
+// That keeps the dependency arrow pointing the right way (context -> api).
+type UnauthorizedHandler = () => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  onUnauthorized = handler;
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Don't fire on the login/register calls themselves (they legitimately
+    // return auth errors); only on already-authenticated requests.
+    const isAuthEndpoint = error.config?.url?.includes('/api/auth/') ?? false;
+    if (axios.isAxiosError(error) && error.response?.status === 401 && !isAuthEndpoint) {
+      onUnauthorized?.(); // clears the session -> nav gate falls back to login
+    }
+    return Promise.reject(error);
+  },
+);
