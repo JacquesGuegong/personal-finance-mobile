@@ -74,6 +74,16 @@ export interface SpendingSummary {
   summary: string;
 }
 
+/** Payload for creating a transaction. */
+export interface TransactionInput {
+  accountId: string;
+  amount: number;
+  type: TransactionType;
+  category: string;
+  description: string;
+  date: string; // YYYY-MM-DD
+}
+
 /** Computed client-side from this month's transactions. */
 export interface MonthSummary {
   income: number;

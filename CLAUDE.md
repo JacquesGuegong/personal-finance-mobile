@@ -86,7 +86,28 @@ Path alias: `@/*` maps to the project root, so import as `@/src/...`.
     KNOWN BACKEND BUGS: PUT /api/accounts/{id} returns 500 (edit broken
     server-side); initial balance cannot be set on create. UI is built correctly
     and surfaces the error; will work once the backend is fixed.
-- Remaining tab screens (Transactions, Budgets, Alerts) are still placeholders.
+- TRANSACTIONS built (src/screens/TransactionsScreen.tsx):
+  - SectionList grouped by date (rows: category icon, description, category,
+    amount colored +green/-red); filter bar (date range via DateField, type
+    SegmentedControl ALL/INCOME/EXPENSE, category chips); FAB opens
+    TransactionFormSheet (account picker, amount numeric, type toggle,
+    description, category with debounced AI auto-suggest via POST
+    /api/ai/categorize -> {category}, date picker) -> POST /api/transactions;
+    swipe-to-delete -> DELETE /api/transactions/{id}.
+  - SWIPE: implemented with core RN PanResponder + Animated
+    (src/components/SwipeableRow.tsx), NOT react-native-gesture-handler.
+    gesture-handler v3 (the SDK 56 version) crashes in Expo Go at
+    installUIRuntimeBindings; PanResponder has no native/worklet deps and works
+    everywhere. babel.config.js (babel-preset-expo) was also added.
+  - Installed: @react-native-community/datetimepicker. Reusable:
+    components/{SegmentedControl,DateField,TransactionFormSheet}, utils/
+    {categoryIcon,transactions}, dates.{toISODateString,fromISODateString,formatDateHeading}.
+  - VERIFIED: POST /api/ai/categorize {description} -> {category} (free-form
+    string); DELETE /api/transactions/{id} -> 204.
+  - NOTE: GET /api/transactions only filters by date range server-side (type &
+    category params are IGNORED) -> type/category filtering is done client-side.
+    GET /api/categories returns 500 -> category list derived from loaded txns.
+- Remaining tab screens (Budgets, Alerts) are still placeholders.
 
 ## API Base URL
 Dev: auto-detected LAN host (so physical devices reach the local server)

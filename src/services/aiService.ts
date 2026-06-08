@@ -7,4 +7,12 @@ export const aiService = {
     const { data } = await api.get<SpendingSummary>('/api/ai/spending-summary');
     return data;
   },
+
+  /** Suggest a category for a transaction from its free-text description. */
+  async categorize(description: string): Promise<string> {
+    const { data } = await api.post<{ category: string }>('/api/ai/categorize', {
+      description,
+    });
+    return data.category;
+  },
 };

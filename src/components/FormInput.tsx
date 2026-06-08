@@ -10,7 +10,7 @@ import Colors from '@/constants/Colors';
 // keyboardType, ...) via `...rest`, so callers configure it like a normal
 // TextInput but get the label + styling for free.
 type FormInputProps = TextInputProps & {
-  label: string;
+  label?: string; // omit/empty to render just the input (e.g. when a custom label sits above)
 };
 
 export default function FormInput({ label, style, ...rest }: FormInputProps) {
@@ -19,7 +19,7 @@ export default function FormInput({ label, style, ...rest }: FormInputProps) {
 
   return (
     <View style={styles.field}>
-      <Text style={[styles.label, { color: colors.text }]}>{label}</Text>
+      {label ? <Text style={[styles.label, { color: colors.text }]}>{label}</Text> : null}
       <TextInput
         style={[
           styles.input,
