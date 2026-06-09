@@ -2,9 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { View } from 'react-native';
 
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
 import OfflineBanner from '@/src/components/OfflineBanner';
+import { colors } from '@/src/constants/theme';
 import { UnreadAlertsProvider, useUnreadAlerts } from '@/src/context/UnreadAlertsContext';
 
 // AppStack — shown only when logged in (gated in app/_layout.tsx).
@@ -23,11 +22,29 @@ export default function AppTabsLayout() {
 }
 
 function AppTabs() {
-  const scheme = useColorScheme();
   const { count } = useUnreadAlerts();
 
   return (
-    <Tabs screenOptions={{ tabBarActiveTintColor: Colors[scheme].tint }}>
+    <Tabs
+      screenOptions={{
+        tabBarActiveTintColor: colors.navy,
+        tabBarInactiveTintColor: colors.inkLight,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarBadgeStyle: { backgroundColor: colors.coral },
+        // Floating white bar: rounded top, soft upward shadow, no hairline.
+        tabBarStyle: {
+          backgroundColor: colors.white,
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          borderTopWidth: 0,
+          shadowColor: colors.navy,
+          shadowOffset: { width: 0, height: -3 },
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          elevation: 12,
+          paddingTop: 6,
+        },
+      }}>
       <Tabs.Screen
         name="dashboard"
         options={{

@@ -30,3 +30,20 @@ export function formatDateHeading(iso: string): string {
     day: 'numeric',
   });
 }
+
+/** Relative section header: "Today" / "Yesterday" / "Mar 15" (+ year if older). */
+export function formatSectionDate(iso: string): string {
+  const date = fromISODateString(iso);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = new Date(date);
+  day.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((today.getTime() - day.getTime()) / 86_400_000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  const sameYear = date.getFullYear() === today.getFullYear();
+  return date.toLocaleDateString(
+    undefined,
+    sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' },
+  );
+}

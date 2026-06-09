@@ -1,347 +1,431 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, type Href } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { useCallback } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
-import Card from '@/src/components/Card';
-import ErrorState from '@/src/components/ErrorState';
-import ProgressBar from '@/src/components/ProgressBar';
-import Skeleton from '@/src/components/Skeleton';
+import SectionHeader from '@/src/components/ui/SectionHeader';
+import { colors, radius, shadows, typography } from '@/src/constants/theme';
 import { useUnreadAlerts } from '@/src/context/UnreadAlertsContext';
 import { useApi } from '@/src/hooks/useApi';
+import { useAuth } from '@/src/hooks/useAuth';
 import { accountService } from '@/src/services/accountService';
 import { aiService } from '@/src/services/aiService';
 import { budgetService } from '@/src/services/budgetService';
 import { transactionService } from '@/src/services/transactionService';
-import { formatCurrency } from '@/src/utils/format';
-import { budgetLevel, budgetPercent, summarizeMonth, sumBalances, type BudgetLevel } from '@/src/utils/finance';
+import type { BudgetStatus, Transaction } from '@/src/types';
+import { fromISODateString } from '@/src/utils/dates';
+import { budgetPercent, summarizeMonth, sumBalances } from '@/src/utils/finance';
+import { formatCurrency, formatCurrencyWhole } from '@/src/utils/format';
 
-// Color per budget health level (also used for net/savings sign).
-const LEVEL_COLOR: Record<BudgetLevel, string> = {
-  ok: '#34c759',
-  warning: '#ff9f0a',
-  exceeded: '#ff3b30',
-};
-const NEGATIVE = '#ff3b30';
-const POSITIVE = '#34c759';
+const AMBER = '#D9A23D';
+const DOT_PALETTE = [colors.navy, colors.slate, colors.sage, colors.coral, AMBER];
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-  const screenBg = scheme === 'dark' ? '#000' : '#f2f2f7';
+  const { user } = useAuth();
+  const { count } = useUnreadAlerts();
+
+  const accounts = useApi(useCallback(() => accountService.getAccounts(), []));
+  const txns = useApi(useCallback(() => transactionService.getCurrentMonth(), []));
+  const budgets = useApi(useCallback(() => budgetService.getBudgets(), []));
+  const summary = useApi(useCallback(() => aiService.getSpendingSummary(), []));
+
+  useFocusEffect(
+    useCallback(() => {
+      void accounts.reload();
+      void txns.reload();
+      void budgets.reload();
+      void summary.reload();
+    }, [accounts.reload, txns.reload, budgets.reload, summary.reload]),
+  );
+
+  const netWorth = sumBalances(accounts.data ?? []);
+  const { income, expenses } = summarizeMonth(txns.data ?? []);
+  const recent = [...(txns.data ?? [])]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 5);
+
+  const monthLabel = new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
   return (
-    <ScrollView
-      style={{ backgroundColor: screenBg }}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
-      <DashboardHeader />
-      <NetWorthCard />
-      <MonthSummaryCard />
-      <BudgetHealthCard />
-      <AiSummaryCard />
-      <Text style={[styles.footnote, { color: colors.text }]}>Revisit the tab to refresh.</Text>
-    </ScrollView>
+    <View style={styles.root}>
+      <StatusBar style="dark" />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
+        showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>{greeting(user?.name, user?.email)}</Text>
+            <Text style={styles.month}>{monthLabel}</Text>
+          </View>
+          <Pressable onPress={() => router.push('/alerts')} hitSlop={8}>
+            <Ionicons name="notifications-outline" size={24} color={colors.navy} />
+            {count > 0 ? <View style={styles.bellDot} /> : null}
+          </Pressable>
+        </View>
+
+        {/* Net worth hero */}
+        <View style={styles.hero}>
+          <View pointerEvents="none" style={styles.heroGlow} />
+          <Text style={styles.heroLabel}>Net worth</Text>
+          <Text style={styles.heroAmount}>{formatCurrency(netWorth)}</Text>
+          <View style={styles.heroPills}>
+            <View style={[styles.heroPill, { backgroundColor: colors.sage }]}>
+              <Text style={styles.heroPillText}>+ {formatCurrencyWhole(income)} income</Text>
+            </View>
+            <View style={[styles.heroPill, { backgroundColor: colors.coral }]}>
+              <Text style={styles.heroPillText}>− {formatCurrencyWhole(expenses)} expenses</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Budgets */}
+        <View style={styles.section}>
+          <SectionHeader title="Budgets" actionLabel="See all" onAction={() => router.push('/budgets')} />
+        </View>
+        {budgets.error ? (
+          <SectionRetry label="Couldn’t load budgets" onRetry={() => void budgets.reload()} />
+        ) : budgets.data && budgets.data.length === 0 ? (
+          <Text style={styles.emptyInline}>No budgets yet.</Text>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.budgetScroll}>
+            {(budgets.data ?? []).map((b) => (
+              <BudgetMiniCard key={b.id} budget={b} />
+            ))}
+          </ScrollView>
+        )}
+
+        {/* AI insight — tap the card for the full Insights screen */}
+        <View style={styles.section}>
+          <Pressable style={styles.aiCard} onPress={() => router.push('/insights' as Href)}>
+            <View style={styles.aiHeader}>
+              <Text style={styles.aiLabel}>AI INSIGHT</Text>
+              <Pressable onPress={() => void summary.reload()} disabled={summary.loading} hitSlop={8}>
+                <Ionicons
+                  name="refresh"
+                  size={16}
+                  color={summary.loading ? colors.mist : colors.inkLight}
+                />
+              </Pressable>
+            </View>
+            <Text style={styles.aiText}>
+              {summary.loading && !summary.data
+                ? 'Reading your spending…'
+                : summary.error
+                  ? 'Insights are unavailable right now.'
+                  : summary.data?.summary}
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Recent */}
+        <View style={styles.section}>
+          <SectionHeader title="Recent" actionLabel="See all" onAction={() => router.push('/transactions')} />
+        </View>
+        <View style={styles.recentCard}>
+          {txns.error ? (
+            <SectionRetry label="Couldn’t load transactions" onRetry={() => void txns.reload()} />
+          ) : recent.length === 0 ? (
+            <Text style={styles.emptyInline}>No transactions yet.</Text>
+          ) : (
+            recent.map((t, i) => (
+              <View key={t.id}>
+                {i > 0 ? <View style={styles.rowDivider} /> : null}
+                <TxnRow txn={t} />
+              </View>
+            ))
+          )}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
-// ─── Header with unread-alerts badge ────────────────────────────────────────
-function DashboardHeader() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-
-  // Shared count (lifted to the tab navigator) — refresh on focus so it reflects
-  // alerts marked read elsewhere.
-  const { count, refresh } = useUnreadAlerts();
-  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
-
-  const showBadge = count > 0;
+// ─── pieces ──────────────────────────────────────────────────────────────────
+function BudgetMiniCard({ budget }: { budget: BudgetStatus }) {
+  const { width } = useWindowDimensions();
+  const pct = budgetPercent(budget);
+  const color = pct >= 100 ? colors.coral : pct >= 70 ? AMBER : colors.sage;
 
   return (
-    <View style={styles.header}>
-      <Text style={[styles.h1, { color: colors.text }]}>Dashboard</Text>
-      <View>
-        <Ionicons name="notifications-outline" size={26} color={colors.text} />
-        {showBadge ? (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{count > 99 ? '99+' : count}</Text>
-          </View>
-        ) : null}
+    <View style={[styles.budgetCard, { width: width * 0.8 }]}>
+      <Text style={styles.budgetCat}>{budget.category}</Text>
+      <View style={styles.track}>
+        <View style={[styles.fill, { width: `${Math.min(100, pct)}%`, backgroundColor: color }]} />
+      </View>
+      <View style={styles.budgetRow}>
+        <Text style={styles.budgetAmounts}>
+          {formatCurrency(budget.spentAmount)} of {formatCurrency(budget.limitAmount)}
+        </Text>
+        <Text style={styles.budgetPct}>{Math.round(pct)}%</Text>
       </View>
     </View>
   );
 }
 
-// ─── 1. Net Worth ───────────────────────────────────────────────────────────
-function NetWorthCard() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-
-  const fetcher = useCallback(() => accountService.getAccounts(), []);
-  const { data, loading, error, reload } = useApi(fetcher);
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
-
+function TxnRow({ txn }: { txn: Transaction }) {
+  const income = txn.type === 'INCOME';
   return (
-    <Card title="Net Worth">
-      {loading && !data ? (
-        <Skeleton width="60%" height={32} />
-      ) : error ? (
-        <ErrorState message="Couldn’t load accounts." onRetry={() => void reload()} />
-      ) : (
-        <Text style={[styles.bigValue, { color: colors.text }]}>
-          {formatCurrency(sumBalances(data ?? []))}
+    <View style={styles.txnRow}>
+      <View style={[styles.dot, { backgroundColor: categoryColor(txn.category) }]} />
+      <View style={styles.txnMid}>
+        <Text style={styles.txnName} numberOfLines={1}>
+          {txn.description || txn.category}
         </Text>
-      )}
-    </Card>
-  );
-}
-
-// ─── 2. This Month (income / expenses / net savings) ────────────────────────
-function MonthSummaryCard() {
-  const fetcher = useCallback(() => transactionService.getCurrentMonth(), []);
-  const { data, loading, error, reload } = useApi(fetcher);
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
-
-  if (loading && !data) {
-    return (
-      <Card title="This Month">
-        <Skeleton width="100%" height={20} />
-        <Skeleton width="80%" height={20} />
-        <Skeleton width="50%" height={20} />
-      </Card>
-    );
-  }
-  if (error) {
-    return (
-      <Card title="This Month">
-        <ErrorState message="Couldn’t load transactions." onRetry={() => void reload()} />
-      </Card>
-    );
-  }
-
-  const { income, expenses, net } = summarizeMonth(data ?? []);
-  return (
-    <Card title="This Month">
-      <SummaryRow label="Income" value={formatCurrency(income)} color={POSITIVE} />
-      <SummaryRow label="Expenses" value={formatCurrency(expenses)} color={NEGATIVE} />
-      <SummaryRow
-        label="Net savings"
-        value={formatCurrency(net)}
-        color={net >= 0 ? POSITIVE : NEGATIVE}
-        emphasize
-      />
-    </Card>
-  );
-}
-
-function SummaryRow({
-  label,
-  value,
-  color,
-  emphasize,
-}: {
-  label: string;
-  value: string;
-  color: string;
-  emphasize?: boolean;
-}) {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-  return (
-    <View style={[styles.row, emphasize && styles.rowEmphasize]}>
-      <Text style={[styles.rowLabel, { color: colors.text }]}>{label}</Text>
-      <Text style={[styles.rowValue, { color }, emphasize && styles.rowValueEmphasize]}>{value}</Text>
+        <Text style={styles.txnDate}>
+          {fromISODateString(txn.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+        </Text>
+      </View>
+      <Text style={[styles.txnAmount, { color: income ? colors.sage : colors.coral }]}>
+        {income ? '+' : '−'}
+        {formatCurrency(txn.amount)}
+      </Text>
     </View>
   );
 }
 
-// ─── 3. Budget Health ───────────────────────────────────────────────────────
-function BudgetHealthCard() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-
-  const fetcher = useCallback(() => budgetService.getBudgets(), []);
-  const { data, loading, error, reload } = useApi(fetcher);
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
-
+function SectionRetry({ label, onRetry }: { label: string; onRetry: () => void }) {
   return (
-    <Card title="Budget Health">
-      {loading && !data ? (
-        <>
-          <Skeleton width="100%" height={36} />
-          <Skeleton width="100%" height={36} />
-        </>
-      ) : error ? (
-        <ErrorState message="Couldn’t load budgets." onRetry={() => void reload()} />
-      ) : (data ?? []).length === 0 ? (
-        <Text style={[styles.muted, { color: colors.text }]}>No budgets yet.</Text>
-      ) : (
-        (data ?? []).map((b) => {
-          const level = budgetLevel(b);
-          const pct = budgetPercent(b);
-          return (
-            <View key={b.id} style={styles.budgetRow}>
-              <View style={styles.budgetHeader}>
-                <Text style={[styles.budgetCategory, { color: colors.text }]}>{b.category}</Text>
-                <Text style={[styles.budgetAmount, { color: colors.text }]}>
-                  {formatCurrency(b.spentAmount)} / {formatCurrency(b.limitAmount)}
-                </Text>
-              </View>
-              <ProgressBar percent={pct} color={LEVEL_COLOR[level]} />
-              <Text style={[styles.budgetPct, { color: LEVEL_COLOR[level] }]}>
-                {Math.round(pct)}% used
-                {level === 'exceeded' ? ' · over budget' : level === 'warning' ? ' · approaching limit' : ''}
-              </Text>
-            </View>
-          );
-        })
-      )}
-    </Card>
+    <View style={styles.section}>
+      <Pressable onPress={onRetry} style={styles.retry} hitSlop={6}>
+        <Ionicons name="refresh" size={15} color={colors.coral} />
+        <Text style={styles.retryText}>{label} · Tap to retry</Text>
+      </Pressable>
+    </View>
   );
 }
 
-// ─── 4. AI Spending Summary (skeleton while loading; graceful failure) ───────
-function AiSummaryCard() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
+// ─── helpers ─────────────────────────────────────────────────────────────────
+function greeting(name?: string, email?: string): string {
+  const hour = new Date().getHours();
+  const part = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const raw = name?.split(' ')[0] || email?.split('@')[0] || 'there';
+  const display = raw.charAt(0).toUpperCase() + raw.slice(1);
+  return `${part}, ${display}`;
+}
 
-  const fetcher = useCallback(() => aiService.getSpendingSummary(), []);
-  const { data, loading, error, reload } = useApi(fetcher);
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
-
-  return (
-    <Pressable onPress={() => router.push('/insights' as Href)}>
-      <Card title="AI Spending Summary">
-        {loading && !data ? (
-          <>
-            <Skeleton width="100%" height={14} />
-            <Skeleton width="95%" height={14} />
-            <Skeleton width="70%" height={14} />
-          </>
-        ) : error ? (
-          <Text style={[styles.muted, { color: colors.text }]}>Insights unavailable</Text>
-        ) : (
-          <Text style={[styles.aiText, { color: colors.text }]}>{data?.summary}</Text>
-        )}
-        <View style={styles.cardLink}>
-          <Text style={[styles.cardLinkText, { color: colors.tint }]}>View AI insights</Text>
-          <Ionicons name="chevron-forward" size={14} color={colors.tint} />
-        </View>
-      </Card>
-    </Pressable>
-  );
+function categoryColor(category: string): string {
+  let hash = 0;
+  for (const ch of category) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return DOT_PALETTE[hash % DOT_PALETTE.length];
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colors.cream,
+  },
   content: {
-    padding: 16,
-    gap: 14,
-    paddingBottom: 40,
+    paddingBottom: 32,
   },
-  cardLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    marginTop: 4,
-  },
-  cardLinkText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  // Header
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 2,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
   },
-  h1: {
-    fontSize: 30,
-    fontWeight: '800',
+  greeting: {
+    ...typography.caption,
+    color: colors.inkLight,
   },
-  badge: {
+  month: {
+    ...typography.titleMD,
+    color: colors.navy,
+    marginTop: 2,
+  },
+  bellDot: {
     position: 'absolute',
-    top: -6,
-    right: -8,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    backgroundColor: '#ff3b30',
-    alignItems: 'center',
-    justifyContent: 'center',
+    top: -2,
+    right: -1,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: colors.coral,
+    borderWidth: 1.5,
+    borderColor: colors.cream,
   },
-  badgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
+  // Hero
+  hero: {
+    marginHorizontal: 20,
+    backgroundColor: colors.navy,
+    borderRadius: radius.xl,
+    padding: 24,
+    overflow: 'hidden',
+    ...shadows.float,
   },
-  bigValue: {
-    fontSize: 34,
-    fontWeight: '800',
+  heroGlow: {
+    position: 'absolute',
+    top: -50,
+    right: -40,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: 'rgba(247,245,241,0.06)',
   },
-  row: {
+  heroLabel: {
+    ...typography.caption,
+    color: 'rgba(255,255,255,0.6)',
+  },
+  heroAmount: {
+    ...typography.displayXL,
+    ...typography.number,
+    color: colors.white,
+    marginTop: 6,
+    marginBottom: 18,
+  },
+  heroPills: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 4,
+    gap: 10,
   },
-  rowEmphasize: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#8e8e93',
-    marginTop: 4,
-    paddingTop: 10,
+  heroPill: {
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
-  rowLabel: {
-    fontSize: 15,
-    opacity: 0.8,
-  },
-  rowValue: {
-    fontSize: 16,
+  heroPillText: {
+    ...typography.caption,
     fontWeight: '600',
+    color: colors.white,
   },
-  rowValueEmphasize: {
-    fontSize: 18,
-    fontWeight: '800',
+  // Sections
+  section: {
+    paddingHorizontal: 20,
+    marginTop: 24,
+  },
+  emptyInline: {
+    ...typography.body,
+    color: colors.inkLight,
+    paddingHorizontal: 20,
+    marginTop: 8,
+  },
+  // Budgets
+  budgetScroll: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    gap: 12,
+  },
+  budgetCard: {
+    backgroundColor: colors.white,
+    borderRadius: radius.xl,
+    padding: 20,
+    ...shadows.card,
+  },
+  budgetCat: {
+    ...typography.titleMD,
+    color: colors.navy,
+    marginBottom: 14,
+  },
+  track: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.mist,
+    overflow: 'hidden',
+  },
+  fill: {
+    height: '100%',
+    borderRadius: 4,
   },
   budgetRow: {
-    gap: 6,
-    paddingVertical: 4,
-  },
-  budgetHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
   },
-  budgetCategory: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  budgetAmount: {
-    fontSize: 13,
-    opacity: 0.7,
+  budgetAmounts: {
+    ...typography.body,
+    color: colors.navy,
   },
   budgetPct: {
-    fontSize: 12,
-    fontWeight: '600',
+    ...typography.caption,
+    color: colors.inkLight,
+  },
+  // AI card
+  aiCard: {
+    backgroundColor: 'rgba(74,158,138,0.10)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.sage,
+    borderRadius: radius.lg,
+    padding: 16,
+    gap: 8,
+  },
+  aiHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  aiLabel: {
+    ...typography.caption,
+    fontWeight: '700',
+    letterSpacing: 1,
+    color: colors.sage,
   },
   aiText: {
-    fontSize: 15,
-    lineHeight: 22,
+    ...typography.body,
+    color: colors.navy,
   },
-  muted: {
-    fontSize: 14,
-    opacity: 0.6,
+  // Recent
+  recentCard: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    backgroundColor: colors.white,
+    borderRadius: radius.xl,
+    paddingHorizontal: 16,
+    ...shadows.card,
   },
-  errorText: {
-    fontSize: 14,
-    color: '#ff3b30',
+  rowDivider: {
+    height: 1,
+    backgroundColor: colors.mist,
   },
-  footnote: {
-    fontSize: 12,
-    opacity: 0.4,
-    textAlign: 'center',
-    marginTop: 4,
+  txnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  txnMid: {
+    flex: 1,
+  },
+  txnName: {
+    ...typography.titleMD,
+    color: colors.navy,
+  },
+  txnDate: {
+    ...typography.caption,
+    color: colors.inkLight,
+    marginTop: 2,
+  },
+  txnAmount: {
+    ...typography.titleMD,
+    ...typography.number,
+  },
+  retry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  retryText: {
+    ...typography.caption,
+    color: colors.coral,
   },
 });
