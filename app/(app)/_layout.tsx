@@ -3,11 +3,22 @@ import { Tabs } from 'expo-router';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
+import { UnreadAlertsProvider, useUnreadAlerts } from '@/src/context/UnreadAlertsContext';
 
 // AppStack — shown only when logged in (gated in app/_layout.tsx).
-// This is the Bottom Tab Navigator: one tab per top-level area of the app.
+// The unread-alerts count lives in a provider ABOVE the tab navigator so the
+// Alerts tab badge (and the Dashboard badge) can read it and stay in sync.
 export default function AppTabsLayout() {
+  return (
+    <UnreadAlertsProvider>
+      <AppTabs />
+    </UnreadAlertsProvider>
+  );
+}
+
+function AppTabs() {
   const scheme = useColorScheme();
+  const { count } = useUnreadAlerts();
 
   return (
     <Tabs screenOptions={{ tabBarActiveTintColor: Colors[scheme].tint }}>
@@ -50,6 +61,7 @@ export default function AppTabsLayout() {
         name="alerts"
         options={{
           title: 'Alerts',
+          tabBarBadge: count > 0 ? count : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="notifications-outline" color={color} size={size} />
           ),

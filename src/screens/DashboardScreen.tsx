@@ -9,10 +9,10 @@ import Colors from '@/constants/Colors';
 import Card from '@/src/components/Card';
 import ProgressBar from '@/src/components/ProgressBar';
 import Skeleton from '@/src/components/Skeleton';
+import { useUnreadAlerts } from '@/src/context/UnreadAlertsContext';
 import { useApi } from '@/src/hooks/useApi';
 import { accountService } from '@/src/services/accountService';
 import { aiService } from '@/src/services/aiService';
-import { alertService } from '@/src/services/alertService';
 import { budgetService } from '@/src/services/budgetService';
 import { transactionService } from '@/src/services/transactionService';
 import { formatCurrency } from '@/src/utils/format';
@@ -52,11 +52,12 @@ function DashboardHeader() {
   const scheme = useColorScheme();
   const colors = Colors[scheme];
 
-  const fetchCount = useCallback(() => alertService.getUnreadCount(), []);
-  const { data: count, reload } = useApi(fetchCount);
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+  // Shared count (lifted to the tab navigator) — refresh on focus so it reflects
+  // alerts marked read elsewhere.
+  const { count, refresh } = useUnreadAlerts();
+  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
 
-  const showBadge = (count ?? 0) > 0;
+  const showBadge = count > 0;
 
   return (
     <View style={styles.header}>
@@ -65,7 +66,7 @@ function DashboardHeader() {
         <Ionicons name="notifications-outline" size={26} color={colors.text} />
         {showBadge ? (
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>{count! > 99 ? '99+' : count}</Text>
+            <Text style={styles.badgeText}>{count > 99 ? '99+' : count}</Text>
           </View>
         ) : null}
       </View>

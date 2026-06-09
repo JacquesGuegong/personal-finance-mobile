@@ -98,3 +98,15 @@ export interface MonthSummary {
   expenses: number;
   net: number;
 }
+
+export type AlertType = 'WARNING' | 'EXCEEDED' | 'ANOMALY';
+
+export interface Alert {
+  id: string;
+  budgetId: string | null; // null for ANOMALY alerts
+  category: string | null; // null for ANOMALY alerts
+  message: string;
+  alertType: AlertType;
+  isRead: boolean;
+  createdAt: string; // local date-time, NO timezone suffix
+}

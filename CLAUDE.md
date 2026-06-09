@@ -72,9 +72,9 @@ Path alias: `@/*` maps to the project root, so import as `@/src/...`.
     [{id,accountId,amount,type:INCOME|EXPENSE,category,description,date}] via
     ?startDate&endDate; budgets [{id,category,limitAmount,spentAmount,month,year}];
     ai {summary}.
-  - KNOWN BACKEND BUGS: GET /api/budgets/status and GET /api/alerts/count return
-    500 (even with data). Services fall back to GET /api/budgets and
-    GET /api/alerts respectively (marked FIXME(backend)); remove once fixed.
+  - (Resolved) GET /api/budgets/status and GET /api/alerts/count used to 500;
+    both are fixed now (status is per-category, count returns {count}). The old
+    fallbacks were removed.
 - ACCOUNTS built (src/screens/AccountsScreen.tsx) + new "Accounts" bottom tab
   (app/(app)/accounts.tsx, between Dashboard and Transactions):
   - FlatList of account cards (name, type, balance colored green/red), net-worth
@@ -124,7 +124,23 @@ Path alias: `@/*` maps to the project root, so import as `@/src/...`.
   - NOTE: GET /api/budgets/status is now per-category (requires ?category=,
     returns {budget, percentUsed}); the LIST uses GET /api/budgets and computes
     % client-side. (The old 500 on /status is gone.)
-- Remaining tab screen (Alerts) is still a placeholder.
+- ALERTS built (src/screens/AlertsScreen.tsx) — all tab screens now done:
+  - FlatList of alert rows: type icon colored by alertType (WARNING amber,
+    EXCEEDED red, ANOMALY purple), message, relative createdAt (parsed as LOCAL
+    time — no TZ suffix — via utils/relativeTime with invalid-date guard),
+    unread rows highlighted, category chip only when category != null.
+  - Filter tabs (SegmentedControl) ALL/UNREAD/ANOMALY -> GET /api/alerts/all,
+    /api/alerts, /api/alerts?type=ANOMALY; refetch on tab change + focus.
+  - Tap row -> PUT /api/alerts/{id}/read (optimistic + reconcile w/ response).
+    Mark-all -> PUT /api/alerts/read-all -> {count}. Loading/empty/error+retry.
+  - alertService: getAll/getUnread/getByType/markRead/markAllRead/getUnreadCount.
+  - UNREAD COUNT lifted to src/context/UnreadAlertsContext, mounted in
+    app/(app)/_layout above the Tabs: powers the Alerts tabBarBadge AND the
+    Dashboard header badge; AlertsScreen calls refresh() after read/read-all so
+    both update reactively.
+  - Verified: alerts/count {count}, /all, /alerts, ?type=, read-all {count} all
+    200. (No alerts exist yet to view — backend generates them and spentAmount
+    is still 0, so none are produced; UI built to the documented Alert shape.)
 
 ## API Base URL
 Dev: auto-detected LAN host (so physical devices reach the local server)
