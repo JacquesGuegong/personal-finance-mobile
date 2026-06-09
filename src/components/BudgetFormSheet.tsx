@@ -9,15 +9,11 @@ import {
   View,
 } from 'react-native';
 
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
-import FormInput from '@/src/components/FormInput';
-import PrimaryButton from '@/src/components/PrimaryButton';
+import { InputField, PrimaryButton } from '@/src/components/ui';
+import { colors, radius, shadows, typography } from '@/src/constants/theme';
 import { budgetService } from '@/src/services/budgetService';
 import { isNonEmpty } from '@/src/utils/validators';
 
-// Add-budget bottom sheet. The month/year come from the screen's selector, so
-// the new budget lands in the month the user is viewing.
 type BudgetFormSheetProps = {
   visible: boolean;
   month: number;
@@ -35,10 +31,6 @@ export default function BudgetFormSheet({
   onClose,
   onCreated,
 }: BudgetFormSheetProps) {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-  const surface = scheme === 'dark' ? '#1c1c1e' : '#ffffff';
-
   const [category, setCategory] = useState('');
   const [limit, setLimit] = useState('');
   const [saving, setSaving] = useState(false);
@@ -65,12 +57,7 @@ export default function BudgetFormSheet({
     setError(null);
     setSaving(true);
     try {
-      await budgetService.createBudget({
-        category: category.trim(),
-        limitAmount: parsedLimit,
-        month,
-        year,
-      });
+      await budgetService.createBudget({ category: category.trim(), limitAmount: parsedLimit, month, year });
       onCreated();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the budget.');
@@ -84,33 +71,34 @@ export default function BudgetFormSheet({
       <KeyboardAvoidingView
         style={styles.backdrop}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.sheet, { backgroundColor: surface }]}>
+        <View style={styles.sheet}>
           <View style={styles.handle} />
-          <Text style={[styles.title, { color: colors.text }]}>Add budget</Text>
-          <Text style={[styles.subtitle, { color: colors.text }]}>for {monthLabel}</Text>
+          <View style={styles.content}>
+            <Text style={styles.title}>New budget</Text>
+            <Text style={styles.subtitle}>for {monthLabel}</Text>
 
-          <FormInput
-            label="Category"
-            placeholder="e.g. Dining"
-            value={category}
-            onChangeText={setCategory}
-            editable={!saving}
-          />
-          <FormInput
-            label="Monthly limit"
-            placeholder="0.00"
-            keyboardType="numeric"
-            value={limit}
-            onChangeText={setLimit}
-            editable={!saving}
-          />
+            <View style={styles.field}>
+              <Text style={styles.label}>Category</Text>
+              <InputField placeholder="e.g. Dining" value={category} onChangeText={setCategory} editable={!saving} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Monthly limit</Text>
+              <InputField
+                placeholder="0.00"
+                keyboardType="decimal-pad"
+                value={limit}
+                onChangeText={setLimit}
+                editable={!saving}
+              />
+            </View>
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <PrimaryButton title="Add budget" onPress={handleSave} loading={saving} disabled={saving} />
-          <Pressable onPress={onClose} disabled={saving} style={styles.cancelBtn}>
-            <Text style={[styles.cancelText, { color: colors.text }]}>Cancel</Text>
-          </Pressable>
+            <PrimaryButton title="Add budget" onPress={handleSave} loading={saving} disabled={saving} />
+            <Pressable onPress={onClose} disabled={saving} style={styles.cancel}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -121,42 +109,54 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(15,43,76,0.45)',
   },
   sheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 32,
-    gap: 14,
+    backgroundColor: colors.white,
+    borderTopLeftRadius: radius.pill,
+    borderTopRightRadius: radius.pill,
+    ...shadows.float,
   },
   handle: {
     alignSelf: 'center',
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#8e8e93',
-    opacity: 0.5,
-    marginBottom: 4,
+    backgroundColor: colors.mist,
+    marginTop: 10,
+  },
+  content: {
+    padding: 24,
+    paddingBottom: 32,
+    gap: 16,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
+    ...typography.titleLG,
+    color: colors.navy,
   },
   subtitle: {
-    fontSize: 14,
-    opacity: 0.6,
-    marginTop: -10,
+    ...typography.caption,
+    color: colors.inkLight,
+    marginTop: -12,
+  },
+  field: {
+    gap: 6,
+  },
+  label: {
+    ...typography.caption,
+    fontWeight: '600',
+    color: colors.inkLight,
   },
   error: {
-    color: '#ff3b30',
+    ...typography.caption,
+    color: colors.coral,
   },
-  cancelBtn: {
-    paddingVertical: 8,
+  cancel: {
     alignItems: 'center',
+    paddingVertical: 10,
   },
   cancelText: {
-    fontSize: 15,
-    opacity: 0.7,
+    ...typography.body,
+    color: colors.inkLight,
   },
 });

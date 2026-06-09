@@ -7,6 +7,7 @@ import { StyleSheet, Text, View } from 'react-native';
 type MarkdownTextProps = {
   text: string;
   color: string;
+  markerColor?: string; // color for list bullets/numbers (defaults to text color)
 };
 
 // Render inline **bold** spans within a line.
@@ -18,7 +19,8 @@ function renderInline(text: string) {
   ));
 }
 
-export default function MarkdownText({ text, color }: MarkdownTextProps) {
+export default function MarkdownText({ text, color, markerColor }: MarkdownTextProps) {
+  const marker = markerColor ?? color;
   const lines = text.split('\n');
 
   return (
@@ -42,7 +44,7 @@ export default function MarkdownText({ text, color }: MarkdownTextProps) {
         if (numbered) {
           return (
             <View key={key} style={styles.listItem}>
-              <Text style={[styles.marker, { color }]}>{numbered[1]}.</Text>
+              <Text style={[styles.marker, { color: marker }]}>{numbered[1]}.</Text>
               <Text style={[styles.body, { color }]}>{renderInline(numbered[2])}</Text>
             </View>
           );
@@ -50,7 +52,7 @@ export default function MarkdownText({ text, color }: MarkdownTextProps) {
         if (line.startsWith('- ') || line.startsWith('* ')) {
           return (
             <View key={key} style={styles.listItem}>
-              <Text style={[styles.marker, { color }]}>•</Text>
+              <Text style={[styles.marker, { color: marker }]}>•</Text>
               <Text style={[styles.body, { color }]}>{renderInline(line.slice(2))}</Text>
             </View>
           );

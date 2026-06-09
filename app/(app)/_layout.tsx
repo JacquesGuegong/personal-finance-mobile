@@ -99,7 +99,7 @@ function AppTabs() {
       />
       {/* Not a tab — a pushed screen (reached from the Dashboard AI card).
           href: null keeps it out of the tab bar but navigable. */}
-      <Tabs.Screen name="insights" options={{ href: null, title: 'AI Insights' }} />
+      <Tabs.Screen name="insights" options={{ href: null, headerShown: false }} />
     </Tabs>
   );
 }

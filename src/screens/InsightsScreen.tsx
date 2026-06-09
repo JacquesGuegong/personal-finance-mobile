@@ -1,212 +1,235 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
-import { useCallback, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useCallback } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
-import Card from '@/src/components/Card';
 import MarkdownText from '@/src/components/MarkdownText';
-import Skeleton from '@/src/components/Skeleton';
-import { useApi, type UseApiResult } from '@/src/hooks/useApi';
+import { colors, radius, shadows, typography } from '@/src/constants/theme';
+import { useApi } from '@/src/hooks/useApi';
 import { aiService } from '@/src/services/aiService';
 import { alertService } from '@/src/services/alertService';
-import type { Alert } from '@/src/types';
+import { transactionService } from '@/src/services/transactionService';
+import type { Transaction } from '@/src/types';
+import { formatCurrency } from '@/src/utils/format';
 import { formatRelativeTime } from '@/src/utils/relativeTime';
 
+const CAT_COLORS = [colors.sage, colors.coral, colors.slate, '#D9A23D'];
+
 export default function InsightsScreen() {
-  const scheme = useColorScheme();
-  const screenBg = scheme === 'dark' ? '#000' : '#f2f2f7';
+  const insets = useSafeAreaInsets();
 
   return (
-    <ScrollView style={{ backgroundColor: screenBg }} contentContainerStyle={styles.content}>
-      <SpendingSummarySection />
-      <BudgetAdviceSection />
-      <AnomaliesSection />
-    </ScrollView>
-  );
-}
+    <View style={styles.root}>
+      <StatusBar style="dark" />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 4 }]}
+        showsVerticalScrollIndicator={false}>
+        <Pressable onPress={() => router.back()} hitSlop={8} style={styles.back}>
+          <Ionicons name="chevron-back" size={26} color={colors.navy} />
+        </Pressable>
+        <Text style={styles.title}>Insights</Text>
+        <Text style={styles.subtitle}>Powered by Claude</Text>
 
-// ─── 1. Spending Summary ─────────────────────────────────────────────────────
-function SpendingSummarySection() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-
-  const fetcher = useCallback(() => aiService.getSpendingSummary(), []);
-  const api = useApi(fetcher);
-  useFocusEffect(useCallback(() => { void api.reload(); }, [api.reload]));
-
-  return (
-    <InsightCard title="Spending Summary" api={api} hasData={api.data !== null} skeletonLines={3}>
-      <Text style={[styles.bodyText, { color: colors.text }]}>{api.data?.summary}</Text>
-    </InsightCard>
-  );
-}
-
-// ─── 2. Budget Advice ────────────────────────────────────────────────────────
-function BudgetAdviceSection() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-
-  const fetcher = useCallback(() => aiService.getBudgetAdvice(), []);
-  const api = useApi(fetcher);
-  useFocusEffect(useCallback(() => { void api.reload(); }, [api.reload]));
-
-  return (
-    <InsightCard title="Budget Advice" api={api} hasData={api.data !== null} skeletonLines={4}>
-      {/* `advice` is free text (often Markdown) — MarkdownText renders both plain
-          paragraphs and the occasional heading/bullet without assuming a list. */}
-      {api.data ? <MarkdownText text={api.data} color={colors.text} /> : null}
-    </InsightCard>
-  );
-}
-
-// ─── 3. Anomaly Alerts ───────────────────────────────────────────────────────
-function AnomaliesSection() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-
-  const fetcher = useCallback(() => alertService.getByType('ANOMALY'), []);
-  const api = useApi(fetcher);
-  useFocusEffect(useCallback(() => { void api.reload(); }, [api.reload]));
-
-  // No client "last updated" here — each anomaly carries its own createdAt.
-  return (
-    <InsightCard title="Anomaly Alerts" api={api} hasData={api.data !== null} skeletonLines={2} hideTimestamp>
-      {api.data && api.data.length === 0 ? (
-        <Text style={[styles.muted, { color: colors.text }]}>No anomalies detected</Text>
-      ) : (
-        api.data?.map((anomaly) => <AnomalyRow key={anomaly.id} anomaly={anomaly} />)
-      )}
-    </InsightCard>
-  );
-}
-
-function AnomalyRow({ anomaly }: { anomaly: Alert }) {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-  return (
-    <View style={styles.anomalyRow}>
-      <Ionicons name="pulse-outline" size={18} color="#af52de" style={styles.anomalyIcon} />
-      <View style={styles.anomalyBody}>
-        {/* Everything (category, amount, reason) is inside `message`. */}
-        <Text style={[styles.bodyText, { color: colors.text }]}>{anomaly.message}</Text>
-        <Text style={[styles.time, { color: colors.text }]}>{formatRelativeTime(anomaly.createdAt)}</Text>
-      </View>
+        <SpendingSummary />
+        <CategoryBreakdown />
+        <BudgetAdvice />
+        <Anomalies />
+      </ScrollView>
     </View>
   );
 }
 
-// ─── Shared section card ─────────────────────────────────────────────────────
-type InsightCardProps<T> = {
-  title: string;
-  api: UseApiResult<T>;
-  hasData: boolean;
-  skeletonLines: number;
-  hideTimestamp?: boolean;
-  children: ReactNode;
-};
-
-function InsightCard<T>({ title, api, hasData, skeletonLines, hideTimestamp, children }: InsightCardProps<T>) {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
+// ─── 1. Spending summary (cream card, navy border) ───────────────────────────
+function SpendingSummary() {
+  const fetcher = useCallback(() => aiService.getSpendingSummary(), []);
+  const { data, loading, error, lastUpdated, reload } = useApi(fetcher);
+  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
 
   return (
-    <Card>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
-        <Pressable onPress={() => void api.reload()} disabled={api.loading} hitSlop={8}>
-          <Ionicons
-            name="refresh"
-            size={20}
-            color={api.loading ? colors.tabIconDefault : colors.tint}
-          />
+    <View style={styles.summaryCard}>
+      <View style={styles.rowBetween}>
+        <Text style={styles.eyebrow}>THIS MONTH</Text>
+        <Pressable onPress={() => void reload()} disabled={loading} hitSlop={8}>
+          <Ionicons name="refresh" size={18} color={loading ? colors.mist : colors.slate} />
         </Pressable>
       </View>
-
-      {api.loading && !hasData ? (
-        // Skeleton on first load only — keep showing cached content on refresh.
-        <View style={styles.skeletonWrap}>
-          {Array.from({ length: skeletonLines }).map((_, i) => (
-            <Skeleton key={i} width={i === skeletonLines - 1 ? '70%' : '100%'} height={14} />
-          ))}
-        </View>
-      ) : api.error ? (
-        // "Tap to refresh" ONLY on a real request failure (network/HTTP) — a 200
-        // fallback sentence is treated as data, not an error.
-        <Pressable onPress={() => void api.reload()} style={styles.errorState}>
-          <Ionicons name="cloud-offline-outline" size={20} color={colors.tabIconDefault} />
-          <Text style={[styles.muted, { color: colors.text }]}>Couldn’t load. Tap to refresh.</Text>
-        </Pressable>
-      ) : (
-        children
-      )}
-
-      {!hideTimestamp && !api.error && api.lastUpdated ? (
-        <Text style={[styles.updated, { color: colors.text }]}>
-          Updated {formatClock(api.lastUpdated)}
-          {api.loading ? ' · refreshing…' : ''}
-        </Text>
-      ) : null}
-    </Card>
+      <Text style={styles.summaryText}>
+        {loading && !data
+          ? 'Reading your spending…'
+          : error
+            ? 'Insights are unavailable right now.'
+            : data?.summary}
+      </Text>
+      {lastUpdated && !error ? <Text style={styles.updated}>Updated {formatClock(lastUpdated)}</Text> : null}
+    </View>
   );
 }
 
+// ─── 2. Category breakdown (RN bar chart) ────────────────────────────────────
+function CategoryBreakdown() {
+  const fetcher = useCallback(() => transactionService.getCurrentMonth(), []);
+  const { data, loading, reload } = useApi(fetcher);
+  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+
+  const cats = expensesByCategory(data ?? []);
+  const max = cats[0]?.amount ?? 0;
+
+  return (
+    <View style={styles.chartCard}>
+      <Text style={styles.cardTitle}>Spending by category</Text>
+      {loading && !data ? (
+        <ActivityIndicator color={colors.navy} style={{ marginVertical: 12 }} />
+      ) : cats.length === 0 ? (
+        <Text style={styles.muted}>No spending this month yet.</Text>
+      ) : (
+        cats.map((c, i) => (
+          <View key={c.category} style={styles.barRow}>
+            <View style={styles.rowBetween}>
+              <Text style={styles.barName}>{c.category}</Text>
+              <Text style={styles.barAmount}>{formatCurrency(c.amount)}</Text>
+            </View>
+            <View style={styles.barTrack}>
+              <View
+                style={[
+                  styles.barFill,
+                  {
+                    width: `${max > 0 ? (c.amount / max) * 100 : 0}%`,
+                    backgroundColor: CAT_COLORS[i % CAT_COLORS.length],
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
+// ─── 3. Budget advice (sage tint) ────────────────────────────────────────────
+function BudgetAdvice() {
+  const fetcher = useCallback(() => aiService.getBudgetAdvice(), []);
+  const { data, loading, error, reload } = useApi(fetcher);
+  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+
+  return (
+    <View style={styles.adviceCard}>
+      <View style={styles.rowBetween}>
+        <Text style={styles.adviceEyebrow}>YOUR ADVISOR</Text>
+        <Pressable onPress={() => void reload()} disabled={loading} hitSlop={8}>
+          <Ionicons name="refresh" size={18} color={loading ? colors.mist : colors.sage} />
+        </Pressable>
+      </View>
+      {loading && !data ? (
+        <Text style={styles.muted}>Thinking about your budgets…</Text>
+      ) : error ? (
+        <Text style={styles.muted}>Advice is unavailable right now.</Text>
+      ) : data ? (
+        <MarkdownText text={data} color={colors.navy} markerColor={colors.sage} />
+      ) : null}
+    </View>
+  );
+}
+
+// ─── 4. Anomalies (coral tint, only if any) ──────────────────────────────────
+function Anomalies() {
+  const fetcher = useCallback(() => alertService.getByType('ANOMALY'), []);
+  const { data, reload } = useApi(fetcher);
+  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+
+  if (!data || data.length === 0) return null;
+
+  return (
+    <View style={styles.anomalySection}>
+      <Text style={styles.anomalyLabel}>UNUSUAL ACTIVITY</Text>
+      {data.map((a) => (
+        <View key={a.id} style={styles.anomalyRow}>
+          <Text style={styles.anomalyMsg}>{a.message}</Text>
+          <Text style={styles.anomalyTime}>{formatRelativeTime(a.createdAt)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
 function formatClock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+function expensesByCategory(txns: Transaction[]): { category: string; amount: number }[] {
+  const map = new Map<string, number>();
+  for (const t of txns) {
+    if (t.type === 'EXPENSE') map.set(t.category, (map.get(t.category) ?? 0) + t.amount);
+  }
+  return [...map.entries()]
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
 const styles = StyleSheet.create({
-  content: {
-    padding: 16,
-    gap: 14,
-    paddingBottom: 40,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  bodyText: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  skeletonWrap: {
-    gap: 8,
-  },
-  errorState: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 6,
-  },
-  updated: {
-    fontSize: 11,
-    opacity: 0.45,
-    marginTop: 4,
-  },
-  muted: {
-    fontSize: 14,
-    opacity: 0.6,
-  },
-  anomalyRow: {
-    flexDirection: 'row',
+  root: { flex: 1, backgroundColor: colors.cream },
+  content: { paddingHorizontal: 20, paddingBottom: 40 },
+  back: { marginBottom: 4, marginLeft: -4 },
+  title: { ...typography.displayMD, color: colors.navy },
+  subtitle: { ...typography.caption, color: colors.inkLight, marginTop: 2, marginBottom: 20 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  muted: { ...typography.body, color: colors.inkLight },
+  // Summary
+  summaryCard: {
+    backgroundColor: colors.cream,
+    borderWidth: 1,
+    borderColor: colors.navy,
+    borderRadius: radius.xl,
+    padding: 18,
     gap: 10,
-    paddingVertical: 6,
   },
-  anomalyIcon: {
-    marginTop: 2,
+  eyebrow: { ...typography.caption, fontWeight: '700', letterSpacing: 1.5, color: colors.inkLight },
+  summaryText: { ...typography.body, color: colors.navy, lineHeight: 24 },
+  updated: { ...typography.caption, color: colors.inkLight },
+  // Chart
+  chartCard: {
+    backgroundColor: colors.white,
+    borderRadius: radius.xl,
+    padding: 18,
+    marginTop: 16,
+    gap: 16,
+    ...shadows.card,
   },
-  anomalyBody: {
-    flex: 1,
-    gap: 2,
+  cardTitle: { ...typography.titleMD, color: colors.navy },
+  barRow: { gap: 8 },
+  barName: { ...typography.caption, color: colors.inkLight },
+  barAmount: { ...typography.caption, fontWeight: '600', color: colors.navy },
+  barTrack: { height: 8, borderRadius: 4, backgroundColor: colors.mist, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 4 },
+  // Advice
+  adviceCard: {
+    backgroundColor: 'rgba(74,158,138,0.10)',
+    borderRadius: radius.xl,
+    padding: 18,
+    marginTop: 16,
+    gap: 10,
   },
-  time: {
-    fontSize: 12,
-    opacity: 0.5,
+  adviceEyebrow: { ...typography.caption, fontWeight: '700', letterSpacing: 1, color: colors.sage },
+  // Anomalies
+  anomalySection: {
+    backgroundColor: 'rgba(232,99,74,0.10)',
+    borderRadius: radius.xl,
+    padding: 18,
+    marginTop: 16,
+    gap: 10,
   },
+  anomalyLabel: { ...typography.caption, fontWeight: '700', letterSpacing: 1, color: colors.coral },
+  anomalyRow: {
+    backgroundColor: colors.white,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.coral,
+    borderRadius: radius.md,
+    padding: 12,
+    gap: 3,
+  },
+  anomalyMsg: { ...typography.body, color: colors.navy },
+  anomalyTime: { ...typography.caption, color: colors.inkLight },
 });
