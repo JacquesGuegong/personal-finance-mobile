@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { memo, useCallback, useState } from 'react';
+import { StatusBar } from 'expo-status-bar';
+import { memo, useCallback, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -12,29 +14,40 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
 import AccountFormModal from '@/src/components/AccountFormModal';
-import ErrorState from '@/src/components/ErrorState';
+import SwipeableRow from '@/src/components/SwipeableRow';
+import { PrimaryButton } from '@/src/components/ui';
+import { colors, radius, shadows, typography } from '@/src/constants/theme';
 import { accountService } from '@/src/services/accountService';
 import type { Account } from '@/src/types';
-import { formatCurrency } from '@/src/utils/format';
 import { sumBalances } from '@/src/utils/finance';
+import { formatCurrency } from '@/src/utils/format';
 
-const POSITIVE = '#34c759';
-const NEGATIVE = '#ff3b30';
+type IoniconName = ComponentProps<typeof Ionicons>['name'];
+
+const TYPE_COLOR: Record<string, string> = {
+  CHECKING: colors.slate,
+  SAVINGS: colors.sage,
+  CREDIT: colors.coral,
+  CASH: '#D9A23D',
+};
+const TYPE_ICON: Record<string, IoniconName> = {
+  CHECKING: 'card-outline',
+  SAVINGS: 'save-outline',
+  CREDIT: 'card',
+  CASH: 'cash-outline',
+};
+
+const typeColor = (t: string) => TYPE_COLOR[t] ?? colors.slate;
+const typeIcon = (t: string): IoniconName => TYPE_ICON[t] ?? 'wallet-outline';
+const typeLabel = (t: string) => t.charAt(0) + t.slice(1).toLowerCase();
 
 export default function AccountsScreen() {
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-  const screenBg = scheme === 'dark' ? '#000' : '#f2f2f7';
 
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Modal: null target = add mode; an account = edit mode.
   const [modalVisible, setModalVisible] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
 
@@ -47,12 +60,7 @@ export default function AccountsScreen() {
     }
   }, []);
 
-  // Reload whenever the tab gains focus (e.g. after adding a transaction).
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -60,182 +68,222 @@ export default function AccountsScreen() {
     setRefreshing(false);
   }, [load]);
 
-  function openAdd() {
+  const openAdd = useCallback(() => {
     setEditing(null);
     setModalVisible(true);
-  }
+  }, []);
 
-  // Stable so the memoized AccountRow doesn't re-render on every parent render.
   const openEdit = useCallback((account: Account) => {
     setEditing(account);
     setModalVisible(true);
   }, []);
 
-  function onSaved() {
-    setModalVisible(false);
-    void load();
-  }
-
-  const netWorth = sumBalances(accounts ?? []);
-
-  const header = (
-    <View style={styles.header}>
-      <View>
-        <Text style={[styles.netLabel, { color: colors.text }]}>Net Worth</Text>
-        <Text style={[styles.netValue, { color: netWorth >= 0 ? colors.text : NEGATIVE }]}>
-          {formatCurrency(netWorth)}
-        </Text>
-      </View>
-      <Pressable onPress={openAdd} style={[styles.addBtn, { backgroundColor: colors.tint }]}>
-        <Ionicons name="add" size={20} color="#fff" />
-        <Text style={styles.addBtnText}>Add</Text>
-      </Pressable>
-    </View>
+  const confirmDelete = useCallback(
+    (account: Account) => {
+      Alert.alert('Delete account', `Delete “${account.name}”? This can’t be undone.`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await accountService.deleteAccount(account.id);
+              void load();
+            } catch {
+              Alert.alert('Error', 'Could not delete the account.');
+            }
+          },
+        },
+      ]);
+    },
+    [load],
   );
 
-  // Initial load (no data yet, no error): show a spinner.
-  if (accounts === null && !error) {
-    return (
-      <View style={[styles.center, { backgroundColor: screenBg, paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={colors.tint} />
-      </View>
-    );
-  }
+  const list = accounts ?? [];
+  const netWorth = sumBalances(list);
 
   return (
-    <View style={{ flex: 1, backgroundColor: screenBg }}>
-      <FlatList
-        data={accounts ?? []}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={[styles.listContent, { paddingTop: insets.top + 12 }]}
-        ListHeaderComponent={header}
-        renderItem={({ item }) => (
-          <AccountRow account={item} onPress={openEdit} />
-        )}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.tint} />
-        }
-        ListEmptyComponent={
-          error ? (
-            <ErrorState message={error} onRetry={() => void load()} />
-          ) : (
-            <Text style={[styles.muted, { color: colors.text }]}>
-              No accounts yet. Tap “Add” to create one.
-            </Text>
-          )
-        }
-      />
+    <View style={styles.root}>
+      <StatusBar style="dark" />
+
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <Text style={styles.title}>Accounts</Text>
+        <Pressable onPress={openAdd} style={styles.addBtn} hitSlop={6}>
+          <Ionicons name="add" size={24} color={colors.slate} />
+        </Pressable>
+      </View>
+
+      {accounts === null && !error ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.navy} />
+        </View>
+      ) : error ? (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable onPress={() => void load()} style={styles.retryBtn}>
+            <Ionicons name="refresh" size={16} color={colors.navy} />
+            <Text style={styles.retryLabel}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : list.length === 0 ? (
+        <EmptyState onAdd={openAdd} />
+      ) : (
+        <FlatList
+          data={list}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.navy} />}
+          ListHeaderComponent={
+            <View style={styles.netCard}>
+              <Text style={styles.netLabel}>Total net worth</Text>
+              <Text style={styles.netAmount}>{formatCurrency(netWorth)}</Text>
+              <Text style={styles.netSub}>
+                Across {list.length} account{list.length === 1 ? '' : 's'}
+              </Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <AccountRow account={item} onPress={openEdit} onDelete={confirmDelete} />
+          )}
+        />
+      )}
 
       <AccountFormModal
         visible={modalVisible}
         account={editing}
         onClose={() => setModalVisible(false)}
-        onSaved={onSaved}
+        onSaved={() => {
+          setModalVisible(false);
+          void load();
+        }}
       />
     </View>
   );
 }
 
-function AccountRowImpl({ account, onPress }: { account: Account; onPress: (account: Account) => void }) {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme];
-  const surface = scheme === 'dark' ? '#1c1c1e' : '#ffffff';
-  const balanceColor = account.balance >= 0 ? POSITIVE : NEGATIVE;
+function AccountRowImpl({
+  account,
+  onPress,
+  onDelete,
+}: {
+  account: Account;
+  onPress: (a: Account) => void;
+  onDelete: (a: Account) => void;
+}) {
+  const color = typeColor(account.type);
+  const balanceColor = account.balance >= 0 ? colors.sage : colors.coral;
 
   return (
-    <Pressable
-      onPress={() => onPress(account)}
-      style={({ pressed }) => [styles.row, { backgroundColor: surface }, pressed && styles.rowPressed]}>
-      <View style={styles.rowLeft}>
-        <Text style={[styles.accountName, { color: colors.text }]}>{account.name}</Text>
-        <Text style={[styles.accountType, { color: colors.text }]}>{account.type}</Text>
+    <SwipeableRow onDelete={() => onDelete(account)}>
+      <Pressable style={styles.rowCard} onPress={() => onPress(account)}>
+        <View style={[styles.circle, { backgroundColor: color }]}>
+          <Ionicons name={typeIcon(account.type)} size={20} color={colors.white} />
+        </View>
+        <View style={styles.rowMid}>
+          <Text style={styles.rowName} numberOfLines={1}>
+            {account.name}
+          </Text>
+          <Text style={styles.rowType}>{typeLabel(account.type)} account</Text>
+        </View>
+        <Text style={[styles.rowBalance, { color: balanceColor }]}>{formatCurrency(account.balance)}</Text>
+        <Ionicons name="chevron-forward" size={18} color={colors.mist} />
+      </Pressable>
+    </SwipeableRow>
+  );
+}
+const AccountRow = memo(AccountRowImpl);
+
+function EmptyState({ onAdd }: { onAdd: () => void }) {
+  return (
+    <View style={styles.empty}>
+      <View style={styles.walletCircle}>
+        <Ionicons name="wallet-outline" size={48} color={colors.navy} />
       </View>
-      <Text style={[styles.accountBalance, { color: balanceColor }]}>
-        {formatCurrency(account.balance)}
-      </Text>
-    </Pressable>
+      <Text style={styles.emptyTitle}>No accounts yet</Text>
+      <Text style={styles.emptySub}>Add your first account to get started.</Text>
+      <View style={styles.emptyBtn}>
+        <PrimaryButton title="Add account" onPress={onAdd} />
+      </View>
+    </View>
   );
 }
 
-// memo: list rows skip re-render when their `account`/`onPress` props are unchanged.
-const AccountRow = memo(AccountRowImpl);
-
 const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  listContent: {
-    padding: 16,
-    gap: 10,
-    paddingBottom: 40,
-  },
+  root: { flex: 1, backgroundColor: colors.cream },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
   },
-  netLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    opacity: 0.6,
-  },
-  netValue: {
-    fontSize: 30,
-    fontWeight: '800',
-    marginTop: 2,
-  },
+  title: { ...typography.displayMD, color: colors.navy },
   addBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    width: 40,
+    height: 40,
     borderRadius: 20,
+    backgroundColor: colors.mist,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  addBtnText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
+  listContent: { paddingHorizontal: 16, paddingBottom: 24 },
+  // Net worth
+  netCard: {
+    backgroundColor: colors.navy,
+    borderRadius: radius.xl,
+    padding: 24,
+    marginBottom: 16,
+    ...shadows.float,
   },
-  row: {
+  netLabel: { ...typography.caption, color: 'rgba(255,255,255,0.6)' },
+  netAmount: { ...typography.displayXL, ...typography.number, color: colors.white, marginTop: 6 },
+  netSub: { ...typography.caption, color: 'rgba(255,255,255,0.5)', marginTop: 6 },
+  // Row
+  rowCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 12,
+    gap: 12,
+    backgroundColor: colors.white,
+    padding: 14,
   },
-  rowPressed: {
-    opacity: 0.7,
+  circle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  rowLeft: {
-    gap: 2,
+  rowMid: { flex: 1 },
+  rowName: { ...typography.titleMD, color: colors.navy },
+  rowType: { ...typography.caption, color: colors.inkLight, marginTop: 2 },
+  rowBalance: { ...typography.titleMD, ...typography.number, fontWeight: '700' },
+  // States
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  errorText: { ...typography.body, color: colors.coral },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.navy,
+    borderRadius: radius.pill,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
-  accountName: {
-    fontSize: 16,
-    fontWeight: '600',
+  retryLabel: { ...typography.caption, fontWeight: '600', color: colors.navy },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, paddingBottom: 40 },
+  walletCircle: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    ...shadows.card,
   },
-  accountType: {
-    fontSize: 12,
-    opacity: 0.5,
-  },
-  accountBalance: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  muted: {
-    fontSize: 14,
-    opacity: 0.6,
-    textAlign: 'center',
-    marginTop: 24,
-  },
-  error: {
-    color: '#ff3b30',
-    textAlign: 'center',
-    marginTop: 24,
-  },
+  emptyTitle: { ...typography.titleLG, color: colors.navy },
+  emptySub: { ...typography.body, color: colors.inkLight, textAlign: 'center', marginTop: 6 },
+  emptyBtn: { alignSelf: 'stretch', marginTop: 24 },
 });
