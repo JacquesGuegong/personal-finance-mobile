@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { useCallback } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useColorScheme } from '@/components/useColorScheme';
@@ -212,19 +212,25 @@ function AiSummaryCard() {
   useFocusEffect(useCallback(() => { void reload(); }, [reload]));
 
   return (
-    <Card title="AI Spending Summary">
-      {loading && !data ? (
-        <>
-          <Skeleton width="100%" height={14} />
-          <Skeleton width="95%" height={14} />
-          <Skeleton width="70%" height={14} />
-        </>
-      ) : error ? (
-        <Text style={[styles.muted, { color: colors.text }]}>Insights unavailable</Text>
-      ) : (
-        <Text style={[styles.aiText, { color: colors.text }]}>{data?.summary}</Text>
-      )}
-    </Card>
+    <Pressable onPress={() => router.push('/insights' as Href)}>
+      <Card title="AI Spending Summary">
+        {loading && !data ? (
+          <>
+            <Skeleton width="100%" height={14} />
+            <Skeleton width="95%" height={14} />
+            <Skeleton width="70%" height={14} />
+          </>
+        ) : error ? (
+          <Text style={[styles.muted, { color: colors.text }]}>Insights unavailable</Text>
+        ) : (
+          <Text style={[styles.aiText, { color: colors.text }]}>{data?.summary}</Text>
+        )}
+        <View style={styles.cardLink}>
+          <Text style={[styles.cardLinkText, { color: colors.tint }]}>View AI insights</Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.tint} />
+        </View>
+      </Card>
+    </Pressable>
   );
 }
 
@@ -238,6 +244,16 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 14,
     paddingBottom: 40,
+  },
+  cardLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginTop: 4,
+  },
+  cardLinkText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',

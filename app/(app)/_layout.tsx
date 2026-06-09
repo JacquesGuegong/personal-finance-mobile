@@ -74,6 +74,9 @@ function AppTabs() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person-outline" color={color} size={size} />,
         }}
       />
+      {/* Not a tab — a pushed screen (reached from the Dashboard AI card).
+          href: null keeps it out of the tab bar but navigable. */}
+      <Tabs.Screen name="insights" options={{ href: null, title: 'AI Insights' }} />
     </Tabs>
   );
 }

@@ -141,6 +141,20 @@ Path alias: `@/*` maps to the project root, so import as `@/src/...`.
   - Verified: alerts/count {count}, /all, /alerts, ?type=, read-all {count} all
     200. (No alerts exist yet to view — backend generates them and spentAmount
     is still 0, so none are produced; UI built to the documented Alert shape.)
+- AI INSIGHTS built (src/screens/InsightsScreen.tsx): a pushed (non-tab) screen
+  at app/(app)/insights.tsx, registered with href:null and reached by tapping the
+  Dashboard "AI Spending Summary" card ("View AI insights ›").
+  - Three sections, each an independent useApi + useFocusEffect:
+    Spending Summary (GET /api/ai/spending-summary {summary}), Budget Advice
+    (GET /api/ai/budget-advice {advice}, rendered via MarkdownText), Anomaly
+    Alerts (GET /api/alerts?type=ANOMALY — render message + relative createdAt;
+    everything is inside message; "No anomalies detected" when []).
+  - AI endpoints return 200 + fallback sentence on Claude degradation, so any 200
+    is shown as text; the "Tap to refresh" error state only appears on a real
+    request failure (the useApi error path). Each AI card shows a client-recorded
+    "Updated HH:MM" (useApi now tracks lastUpdated = Date.now() on success);
+    anomalies use per-row createdAt. Skeleton on first load; cached text stays
+    visible during refresh.
 
 ## API Base URL
 Dev: auto-detected LAN host (so physical devices reach the local server)
