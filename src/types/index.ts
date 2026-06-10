@@ -82,6 +82,16 @@ export interface BudgetInput {
   year: number;
 }
 
+/** Spring-style pagination envelope returned by paginated list endpoints. */
+export interface PageResponse<T> {
+  content: T[];
+  page: number; // zero-based index of the page returned
+  size: number; // page size actually applied by the server (may be clamped — trust this)
+  totalElements: number; // total matching rows across all pages
+  totalPages: number;
+  hasNext: boolean; // false on the last page
+}
+
 /** Payload for creating a transaction. */
 export interface TransactionInput {
   accountId: string;

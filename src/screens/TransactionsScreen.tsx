@@ -20,24 +20,12 @@ import TransactionFormSheet from '@/src/components/TransactionFormSheet';
 import { colors, radius, shadows, typography } from '@/src/constants/theme';
 import { accountService } from '@/src/services/accountService';
 import { transactionService } from '@/src/services/transactionService';
-import type { Account, Transaction, TransactionType } from '@/src/types';
+import type { Account, PageResponse, Transaction } from '@/src/types';
 import { formatSectionDate, toISODateString } from '@/src/utils/dates';
 import { formatCurrency } from '@/src/utils/format';
-import { distinctCategories, groupByDate } from '@/src/utils/transactions';
+import { groupByDate } from '@/src/utils/transactions';
 
-// A single-select filter across one chip row: All / Income / Expenses / <category>.
-type Filter =
-  | { kind: 'all' }
-  | { kind: 'type'; type: TransactionType }
-  | { kind: 'category'; category: string };
-
-const ALL: Filter = { kind: 'all' };
-
-function matches(filter: Filter, t: Transaction): boolean {
-  if (filter.kind === 'all') return true;
-  if (filter.kind === 'type') return t.type === filter.type;
-  return t.category === filter.category;
-}
+const PAGE_SIZE = 20;
 
 export default function TransactionsScreen() {
   const insets = useSafeAreaInsets();
@@ -45,57 +33,113 @@ export default function TransactionsScreen() {
   const now = new Date();
   const [startDate, setStartDate] = useState(new Date(now.getFullYear(), now.getMonth(), 1));
   const [endDate, setEndDate] = useState(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-  const [filter, setFilter] = useState<Filter>(ALL);
   const [showDateRange, setShowDateRange] = useState(false);
 
-  const [transactions, setTransactions] = useState<Transaction[] | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  // Filtering is now server-side: date range + an optional category. (Income/
+  // expense filtering was dropped — the API has no `type` param, so it can't be
+  // done correctly across server pages.) `categoryOptions` accumulates categories
+  // we've seen so the chips stay stable even when one category is selected.
+  const [category, setCategory] = useState<string | null>(null);
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+
+  const [page, setPage] = useState(0);
+  const [data, setData] = useState<PageResponse<Transaction> | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [fabVisible, setFabVisible] = useState(false);
 
-  const load = useCallback(async () => {
+  const fetchCurrent = useCallback(async () => {
+    setLoading(true);
     setError(null);
     try {
-      const [txns, accts] = await Promise.all([
-        transactionService.getRange(toISODateString(startDate), toISODateString(endDate)),
-        accountService.getAccounts(),
-      ]);
-      setTransactions(txns);
-      setAccounts(accts);
+      const res = await transactionService.getPage({
+        startDate: toISODateString(startDate),
+        endDate: toISODateString(endDate),
+        category: category ?? undefined,
+        page,
+        size: PAGE_SIZE,
+      });
+      // If a delete emptied the current page, step back into range.
+      if (res.content.length === 0 && page > 0 && res.totalElements > 0) {
+        setPage((p) => Math.max(0, p - 1));
+        return;
+      }
+      setData(res);
+      if (res.content.length > 0) {
+        setCategoryOptions((prev) => {
+          const set = new Set(prev);
+          for (const t of res.content) set.add(t.category);
+          return [...set].sort();
+        });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load transactions.');
+    } finally {
+      setLoading(false);
     }
-  }, [startDate, endDate]);
+  }, [startDate, endDate, category, page]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void fetchCurrent();
+  }, [fetchCurrent]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useFocusEffect(useCallback(() => { void fetchCurrent(); }, [fetchCurrent]));
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      setAccounts(await accountService.getAccounts());
+    } catch {
+      /* the form just won't have accounts; the list still works */
+    }
+  }, []);
+  useFocusEffect(useCallback(() => { void loadAccounts(); }, [loadAccounts]));
+
+  // Filter/date changes reset to page 0 and show a fresh load (clear data).
+  function selectCategory(next: string | null) {
+    setCategory(next);
+    setPage(0);
+    setData(null);
+  }
+  function changeStart(d: Date) {
+    setStartDate(d);
+    setCategory(null);
+    setCategoryOptions([]);
+    setPage(0);
+    setData(null);
+  }
+  function changeEnd(d: Date) {
+    setEndDate(d);
+    setCategory(null);
+    setCategoryOptions([]);
+    setPage(0);
+    setData(null);
+  }
+  // Page nav keeps the previous rows visible (no `setData(null)`).
+  const goToPage = (p: number) => setPage(p);
 
   const handleDelete = useCallback(async (id: string) => {
-    let snapshot: Transaction[] | null = null;
-    setTransactions((cur) => {
-      snapshot = cur;
-      return cur?.filter((t) => t.id !== id) ?? cur;
+    let snapshot: PageResponse<Transaction> | null = null;
+    setData((d) => {
+      snapshot = d;
+      return d
+        ? { ...d, content: d.content.filter((t) => t.id !== id), totalElements: Math.max(0, d.totalElements - 1) }
+        : d;
     });
     try {
       await transactionService.deleteTransaction(id);
+      void fetchCurrent(); // resync counts / pages with the server
     } catch {
-      setTransactions(snapshot);
+      setData(snapshot);
       Alert.alert('Delete failed', 'Could not delete that transaction. Please try again.');
     }
-  }, []);
+  }, [fetchCurrent]);
 
-  const categories = useMemo(() => distinctCategories(transactions ?? []), [transactions]);
-  const sections = useMemo(
-    () => groupByDate((transactions ?? []).filter((t) => matches(filter, t))),
-    [transactions, filter],
-  );
+  const sections = useMemo(() => groupByDate(data?.content ?? []), [data]);
+  const totalElements = data?.totalElements ?? 0;
+  const totalPages = data?.totalPages ?? 0;
+  const hasNext = data?.hasNext ?? false;
 
   return (
     <View style={styles.root}>
@@ -115,66 +159,77 @@ export default function TransactionsScreen() {
       {/* Date range (toggle) */}
       {showDateRange ? (
         <View style={styles.dateRow}>
-          <DateField label="From" value={startDate} onChange={setStartDate} />
-          <DateField label="To" value={endDate} onChange={setEndDate} />
+          <DateField label="From" value={startDate} onChange={changeStart} />
+          <DateField label="To" value={endDate} onChange={changeEnd} />
         </View>
       ) : null}
 
-      {/* Filter chips */}
+      {/* Category chips */}
       <View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chips}>
-          <Chip label="All" active={filter.kind === 'all'} onPress={() => setFilter(ALL)} />
-          <Chip
-            label="Income"
-            active={filter.kind === 'type' && filter.type === 'INCOME'}
-            onPress={() => setFilter({ kind: 'type', type: 'INCOME' })}
-          />
-          <Chip
-            label="Expenses"
-            active={filter.kind === 'type' && filter.type === 'EXPENSE'}
-            onPress={() => setFilter({ kind: 'type', type: 'EXPENSE' })}
-          />
-          {categories.map((c) => (
-            <Chip
-              key={c}
-              label={c}
-              active={filter.kind === 'category' && filter.category === c}
-              onPress={() => setFilter({ kind: 'category', category: c })}
-            />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          <Chip label="All" active={category === null} onPress={() => selectCategory(null)} />
+          {categoryOptions.map((c) => (
+            <Chip key={c} label={c} active={category === c} onPress={() => selectCategory(c)} />
           ))}
         </ScrollView>
       </View>
 
-      {/* List */}
-      {transactions === null && !error ? (
+      {/* Body */}
+      {data === null && !error ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.navy} />
         </View>
       ) : error ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable onPress={() => void load()} style={styles.retryBtn}>
+          <Pressable onPress={() => void fetchCurrent()} style={styles.retryBtn}>
             <Ionicons name="refresh" size={16} color={colors.navy} />
             <Text style={styles.retryLabel}>Retry</Text>
           </Pressable>
         </View>
+      ) : totalElements === 0 ? (
+        <View style={styles.center}>
+          <Text style={styles.empty}>No transactions in this range.</Text>
+        </View>
       ) : (
-        <SectionList
-          sections={sections}
-          keyExtractor={(item) => item.id}
-          stickySectionHeadersEnabled={false}
-          contentContainerStyle={styles.listContent}
-          renderSectionHeader={({ section }) => (
-            <Text style={styles.sectionHeader}>{formatSectionDate(section.title)}</Text>
-          )}
-          renderItem={({ item }) => <TxnRow txn={item} onDelete={handleDelete} />}
-          ListEmptyComponent={
-            <Text style={styles.empty}>No transactions match these filters.</Text>
-          }
-        />
+        <>
+          <SectionList
+            style={styles.list}
+            sections={sections}
+            keyExtractor={(item) => item.id}
+            stickySectionHeadersEnabled={false}
+            contentContainerStyle={styles.listContent}
+            renderSectionHeader={({ section }) => (
+              <Text style={styles.sectionHeader}>{formatSectionDate(section.title)}</Text>
+            )}
+            renderItem={({ item }) => <TxnRow txn={item} onDelete={handleDelete} />}
+          />
+          <View style={styles.pageBar}>
+            <Pressable
+              onPress={() => goToPage(page - 1)}
+              disabled={page === 0 || loading}
+              style={[styles.pageBtn, (page === 0 || loading) && styles.pageBtnDisabled]}>
+              <Ionicons name="chevron-back" size={16} color={colors.navy} />
+              <Text style={styles.pageBtnText}>Prev</Text>
+            </Pressable>
+
+            {loading ? (
+              <ActivityIndicator color={colors.navy} />
+            ) : (
+              <Text style={styles.pageInfo}>
+                Page {page + 1} of {Math.max(1, totalPages)}
+              </Text>
+            )}
+
+            <Pressable
+              onPress={() => goToPage(page + 1)}
+              disabled={!hasNext || loading}
+              style={[styles.pageBtn, (!hasNext || loading) && styles.pageBtnDisabled]}>
+              <Text style={styles.pageBtnText}>Next</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.navy} />
+            </Pressable>
+          </View>
+        </>
       )}
 
       {/* FAB */}
@@ -188,7 +243,7 @@ export default function TransactionsScreen() {
         onClose={() => setFabVisible(false)}
         onCreated={() => {
           setFabVisible(false);
-          void load();
+          void fetchCurrent();
         }}
       />
     </View>
@@ -229,10 +284,7 @@ function TxnRowImpl({ txn, onDelete }: { txn: Transaction; onDelete: (id: string
 const TxnRow = memo(TxnRowImpl);
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
+  root: { flex: 1, backgroundColor: colors.cream },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -240,10 +292,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
-  title: {
-    ...typography.displayMD,
-    color: colors.navy,
-  },
+  title: { ...typography.displayMD, color: colors.navy },
   filterBtn: {
     width: 40,
     height: 40,
@@ -252,42 +301,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dateRow: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-  },
-  chips: {
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    gap: 8,
-  },
-  chip: {
-    borderRadius: radius.pill,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-  },
-  chipActive: {
-    backgroundColor: colors.navy,
-  },
-  chipInactive: {
-    backgroundColor: colors.mist,
-  },
-  chipText: {
-    ...typography.caption,
-    fontWeight: '600',
-  },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  errorText: {
-    ...typography.body,
-    color: colors.coral,
-  },
+  dateRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingBottom: 12 },
+  chips: { paddingHorizontal: 20, paddingBottom: 12, gap: 8 },
+  chip: { borderRadius: radius.pill, paddingHorizontal: 16, paddingVertical: 9 },
+  chipActive: { backgroundColor: colors.navy },
+  chipInactive: { backgroundColor: colors.mist },
+  chipText: { ...typography.caption, fontWeight: '600' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
+  errorText: { ...typography.body, color: colors.coral },
   retryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -298,27 +319,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  retryLabel: {
-    ...typography.caption,
-    fontWeight: '600',
-    color: colors.navy,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 100, // clear the FAB
-  },
+  retryLabel: { ...typography.caption, fontWeight: '600', color: colors.navy },
+  empty: { ...typography.body, color: colors.inkLight, textAlign: 'center' },
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 16 },
   sectionHeader: {
     ...typography.caption,
     color: colors.inkLight,
     marginTop: 16,
     marginBottom: 8,
     marginLeft: 4,
-  },
-  empty: {
-    ...typography.body,
-    color: colors.inkLight,
-    textAlign: 'center',
-    marginTop: 40,
   },
   rowCard: {
     flexDirection: 'row',
@@ -327,39 +337,39 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     padding: 14,
   },
-  circle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  circle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  circleText: { ...typography.titleMD, color: colors.white, fontWeight: '700' },
+  rowMid: { flex: 1 },
+  rowDesc: { ...typography.titleMD, color: colors.navy },
+  rowCat: { ...typography.caption, color: colors.inkLight, marginTop: 2 },
+  rowAmount: { ...typography.titleMD, ...typography.number, fontWeight: '700' },
+  // Pagination
+  pageBar: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.mist,
+    backgroundColor: colors.cream,
   },
-  circleText: {
-    ...typography.titleMD,
-    color: colors.white,
-    fontWeight: '700',
+  pageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.mist,
+    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  rowMid: {
-    flex: 1,
-  },
-  rowDesc: {
-    ...typography.titleMD,
-    color: colors.navy,
-  },
-  rowCat: {
-    ...typography.caption,
-    color: colors.inkLight,
-    marginTop: 2,
-  },
-  rowAmount: {
-    ...typography.titleMD,
-    ...typography.number,
-    fontWeight: '700',
-  },
+  pageBtnDisabled: { opacity: 0.4 },
+  pageBtnText: { ...typography.caption, fontWeight: '600', color: colors.navy },
+  pageInfo: { ...typography.caption, color: colors.inkLight },
   fab: {
     position: 'absolute',
     right: 24,
-    bottom: 24,
+    bottom: 78,
     width: 56,
     height: 56,
     borderRadius: 28,
